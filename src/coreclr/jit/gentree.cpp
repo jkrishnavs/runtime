@@ -19376,6 +19376,16 @@ GenTree* Compiler::gtNewSimdAbsNode(
         NamedIntrinsic intrinsic = (simdSize == 32) ? NI_AVX2_Abs : NI_SSSE3_Abs;
         return gtNewSimdHWIntrinsicNode(type, op1, intrinsic, simdBaseJitType, simdSize, isSimdAsHWIntrinsic);
     }
+    else if ((compIsaSupportedDebugOnly(InstructionSet_AVX512F)) && ((simdBaseType == TYP_INT) || (simdBaseType == TYP_LONG)))
+    {
+        NamedIntrinsic intrinsic = NI_AVX512F_Abs;
+        return gtNewSimdHWIntrinsicNode(type, op1, intrinsic, simdBaseJitType, simdSize, isSimdAsHWIntrinsic);
+    }
+    else if ((compIsaSupportedDebugOnly(InstructionSet_AVX512BW)) && ((simdBaseType == TYP_BYTE) || (simdBaseType == TYP_SHORT)))
+    {
+        NamedIntrinsic intrinsic = NI_AVX512BW_Abs;
+        return gtNewSimdHWIntrinsicNode(type, op1, intrinsic, simdBaseJitType, simdSize, isSimdAsHWIntrinsic);
+    }
     else
     {
         GenTree*             tmp;
@@ -20188,6 +20198,11 @@ GenTree* Compiler::gtNewSimdCeilNode(
     {
         assert(compIsaSupportedDebugOnly(InstructionSet_AVX));
         intrinsic = NI_AVX_Ceiling;
+    }
+    else if(simdSize == 64)
+    {
+        assert(compIsaSupportedDebugOnly(InstructionSet_AVX512F));
+        intrinsic = NI_AVX512F_Ceiling;
     }
     else
     {
