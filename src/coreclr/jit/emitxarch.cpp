@@ -9086,13 +9086,84 @@ void emitter::emitIns_S_R(instruction ins, emitAttr attr, regNumber ireg, int va
     emitCurIGsize += sz;
 }
 
+//----------------------------------------------------------------------------------------
+// IsDuplicateStackLoad:
+//    Check if the current stack load instruction is loading the same memory location.
+//    In such cases, we can replace the second load with a register move, since we already
+//    have the data in another register.
+//    Eg, Move that is identical to last instruction emitted.
+//            mov      eax, dword ptr [rbp-0x04]
+//            mov      ecx, dword ptr [rbp-0x04] // Will be replced with mov ecx, eax
+//    Restrictions:
+//    1.    mov      rcx, qword ptr [rcx]
+//          mov      rbx, qword ptr [rcx]
+//     This is not a duplicate load, but a double dereference.
+//    2.    mov      rax, qword ptr [rbp-0x8]
+//          mov      rcx, gword ptr [rbp-0x8]
+//          The second one is a gword ptr.
+//          Function modelled after RedundantStackMov
+// Arguments:
+//                 ins  - The current instruction
+//                 fmt  - The current format
+//                 size - Operand size of current instruction
+//                 ireg - The current source/destination register
+//                 varx - The variable index used for the memory address
+//                 offs - The offset added to the memory address from varx
+//
+// Return Value:
+//    true if the load is duplicate and replaced by a mov instruction.
+bool emitter::IsDuplicateStackLoad(instruction ins, insFormat fmt, emitAttr size, regNumber ireg, int varx, int offs)
+{
+    assert(IsMovInstruction(ins));
+    assert(fmt == IF_RWR_SRD);
+    if (!emitComp->opts.OptimizationEnabled())
+    {
+        // if optimizations are enabled
+        return false;
+    }
+
+    // TODO-XArch-CQ: Certain instructions, such as movaps vs movups, are equivalent in
+    // functionality even if their actual identifier differs and we should optimize these
+    // TODO: These checks are similar to redundant load should we megre?
+    if (!emitCanPeepholeLastIns() ||       // Don't optimize if unsafe
+        (emitLastIns->idIns() != ins)  ||   // or if the instruction is different from the last instruction
+        (emitLastIns->idOpSize() != size)  || // or if the operand size is different from the last instruction
+        !(emitLastIns->idInsFmt() == IF_RWR_SRD) || // or if last instruction is not a load.
+        HasSideEffect(ins, size))   // or if the load has side effects
+    {
+        return false;
+    }
+
+    regNumber lastReg1 = emitLastIns->idReg1();
+    if(lastReg1)
+    {
+        //if effective address changed in the previous load
+        return false;
+    }
+    int       varNum   = emitLastIns->idAddr()->iiaLclVar.lvaVarNum();
+    int       lastOffs = emitLastIns->idAddr()->iiaLclVar.lvaOffset();
+    LclVarDsc* varDsc = lvaGetDesc(varx);
+    if(varDsc->lvIsRegArg) {
+        //TODO: Here Test if we are doing a double dereferencing.
+
+    }
+
+    // Check if the last instruction and current instructions use the same local memory.
+    if (varNum == varx && lastOffs == offs)
+    {
+        emitIns_R_R(ins, size, ireg, lastReg1);
+    }
+    return false;
+}
+
 void emitter::emitIns_R_S(instruction ins, emitAttr attr, regNumber ireg, int varx, int offs)
 {
     emitAttr size = EA_SIZE(attr);
     noway_assert(emitVerifyEncodable(ins, size, ireg));
     insFormat fmt = emitInsModeFormat(ins, IF_RRD_SRD);
 
-    if (IsMovInstruction(ins) && IsRedundantStackMov(ins, fmt, attr, ireg, varx, offs))
+    if (IsMovInstruction(ins) && (IsRedundantStackMov(ins, fmt, attr, ireg, varx, offs)
+        ||IsDuplicateStackLoad(ins, fmt, attr, ireg, varx, offs)))
     {
         return;
     }
